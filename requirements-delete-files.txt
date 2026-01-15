@@ -1,0 +1,8 @@
+azure-identity==1.22.0
+azure-storage-blob==12.25.1
+azure-monitor-opentelemetry==1.6.8
+openai==1.77.0
+Office365-REST-Python-Client==2.6.1
+pymsteams==0.2.2
+python-dotenv==1.1.0
+pandas==2.3.1

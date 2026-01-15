@@ -1,0 +1,259 @@
+trigger:
+  branches:
+    include:
+    - main
+  paths:
+    include:
+    - src/*
+
+parameters:
+  - name: buildTag
+    type: string
+    default: ' '
+
+variables:
+  - name: tag
+    ${{ if eq( parameters.buildTag, ' ' ) }}:
+      value: $(Build.BuildId)
+    ${{ else }}:
+      value: ${{ parameters.buildTag }}
+  - name: container_repository
+    value: veiligchatgpt
+  - name: app_name
+    value: veiligchatgpt
+  - name: isMain
+    value: $[eq(variables['Build.SourceBranch'], 'refs/heads/main')]
+
+stages:
+
+- stage: CI  
+  pool:
+    vmImage: ubuntu-latest
+  jobs:
+  - job: lint
+    displayName: lint checks
+    steps:
+    - task: UsePythonVersion@0
+      inputs:
+        versionSpec: '3.10'
+    - checkout: self
+    - script: pip install pre-commit==3.8.0
+    - bash: pre-commit run --all -v
+  - job: SastBandit
+    displayName: SAST - Bandit
+    steps:
+    - task: UsePythonVersion@0
+      inputs:
+        versionSpec: '3.10'
+    - script: |
+        python -m pip install bandit
+      name: install_bandit
+      displayName: 'Install bandit'
+    # bandit -lll means only flag HIGH severity issues
+    - script: |
+        python -m bandit -r ./src -lll
+      displayName: 'Bandit scan'
+      condition: succeeded() 
+  - job: SastMdso
+    displayName: SAST - Terrascan and Trivy
+    steps:
+    - task: MicrosoftSecurityDevOps@1
+      displayName: 'Microsoft Security DevOps'
+      inputs:
+        tools: 'terrascan, trivy'
+        break: true # this build step if any high severity level results are found.
+        publish: true # will publish the output SARIF results file to the chosen pipeline artifact
+  - job: test
+    displayName: tests
+    steps:
+    - bash: echo TO BE ADDED
+
+
+- stage: BuildAndPush
+  dependsOn: CI
+  pool:
+    vmImage: ubuntu-latest
+  jobs:
+  - deployment: BuildAndPush
+    displayName: Build and Push image to container registry
+    environment: 
+      name: Test
+    strategy:
+      runOnce:
+        deploy:
+          steps:
+          - checkout: self
+          - task: Docker@2
+            displayName: Build docker image
+            inputs:
+              command: build
+              containerRegistry: Pitwall-datapltfrm-docker-prd
+              repository: $(container_repository)
+              dockerfile: dockerfiles/shared/Dockerfile.app
+              buildContext: $(Build.SourcesDirectory)
+              arguments: '--build-arg BUILD_TAG=$(tag)'
+
+          - task: Docker@2
+            displayName: Push docker image to container registry
+            inputs:
+              command: push
+              containerRegistry: Pitwall-datapltfrm-docker-prd
+              repository: $(container_repository)
+              dockerfile: dockerfiles/shared/Dockerfile.app
+              buildContext: $(Build.SourcesDirectory)
+
+- stage: DeployTest
+  pool:
+    vmImage: ubuntu-latest
+  jobs:
+  - deployment: DeployTest
+    displayName: Deploy to test slot
+    environment: 
+      name: Test
+    strategy:
+      runOnce:
+        deploy:
+          steps:
+          - checkout: self
+          - template: keyvault-firewall.yml
+            parameters:
+              serviceConnection: Pitwall-Dev
+              kvName: kv-ml-pltfrm-dev
+              resourceGroup: rg-datapltfrm-dev
+          - task: AzureRmWebAppDeployment@4
+            displayName: Deploy Web App Test Slot
+            inputs:
+              ConnectionType: AzureRM
+              azureSubscription: Pitwall-Prod
+              appType: webAppContainer
+              WebAppName: $(app_name)
+              deployToSlotOrASE: true
+              resourceGroupName: rg-mlcontainers-prd
+              slotName: tst
+              DockerNamespace: crmlpltfrmprd.azurecr.io
+              DockerRepository: $(container_repository)
+              DockerImageTag: $(tag)
+              TakeAppOfflineFlag: true
+              AppSettings: >- # >- is important for multiline block
+                -WEBSITES_PORT 8080 
+                -OTAP tst
+                -AML_SUBSCRIPTION_ID "$(AML-SUBSCRIPTION-ID)"
+                -APPLICATION_INSIGHTS_CONNECTION_STRING "$(APPLICATION-INSIGHTS-CONNECTION-STRING)"
+                -APPLICATION_INSIGHTS_NAMESPACE "$(APPLICATION-INSIGHTS-NAMESPACE)"
+                -OPENAI_API_KEY_WESTEUROPE "$(OPENAI-API-KEY)"
+                -OPENAI_ENDPOINT_WESTEUROPE "$(OPENAI-ENDPOINT)"
+                -OPENAI_SWEDEN_ENDPOINT "$(OPENAI-SWEDEN-ENDPOINT)"
+                -OPENAI_SWEDEN "$(OPENAI-SWEDEN)"
+                -DATALAKE_NAME "$(DATALAKE-NAME)"
+                -DATALAKE_NAME_DEV "$(DATALAKE-NAME-DEV)"
+                -DATALAKE_NAME_PRD "$(DATALAKE-NAME-PRD)"
+                -STORAGE_ACCOUNT_STDLSPLTFRM_ACCOUNT_KEY "$(STORAGE-ACCOUNT-STDLSPLTFRM-ACCOUNT-KEY)"
+                -ID_UAMI_MLW_ML_PLTFRM_PRD_CI_CLIENT_ID "$(ID-UAMI-MLW-ML-PLTFRM-PRD-CI-CLIENT-ID)"
+                -POWER_AUTOMATE_SEND_EMAIL_FLOW_URL "$(POWER-AUTOMATE-SEND-EMAIL-FLOW-URL)"
+                -RESOURCE_GROUP_PRD "$(RESOURCE-GROUP-PRD)"
+                -WORKSPACE_NAME_PRD "$(WORKSPACE-NAME-PRD)"
+                
+- stage: DeployAcc
+  pool:
+    vmImage: ubuntu-latest
+  jobs:
+  - deployment: DeployWebAppAcc
+    displayName: Deploy to acceptance slot
+    environment: 
+      name: Acc
+    strategy:
+      runOnce:
+        deploy:
+          steps:
+          - checkout: self
+          - template: keyvault-firewall.yml
+            parameters:
+              serviceConnection: Pitwall-Dev
+              kvName: kv-ml-pltfrm-dev
+              resourceGroup: rg-datapltfrm-dev
+          - task: AzureRmWebAppDeployment@4
+            displayName: Deploy Web App Acceptance Slot
+            inputs:
+              ConnectionType: AzureRM
+              azureSubscription: Pitwall-Prod
+              appType: webAppContainer
+              WebAppName: $(app_name)
+              deployToSlotOrASE: true
+              resourceGroupName: rg-mlcontainers-prd
+              slotName: acc
+              DockerNamespace: crmlpltfrmprd.azurecr.io
+              DockerRepository: $(container_repository)
+              DockerImageTag: $(tag)
+              TakeAppOfflineFlag: true
+              AppSettings: >- # >- is important for multiline block
+                -WEBSITES_PORT 8080 
+                -OTAP acc
+                -AML_SUBSCRIPTION_ID "$(AML-SUBSCRIPTION-ID)"
+                -APPLICATION_INSIGHTS_CONNECTION_STRING "$(APPLICATION-INSIGHTS-CONNECTION-STRING)"
+                -APPLICATION_INSIGHTS_NAMESPACE "$(APPLICATION-INSIGHTS-NAMESPACE)"
+                -OPENAI_API_KEY_WESTEUROPE "$(OPENAI-API-KEY)"
+                -OPENAI_ENDPOINT_WESTEUROPE "$(OPENAI-ENDPOINT)"
+                -OPENAI_SWEDEN_ENDPOINT "$(OPENAI-SWEDEN-ENDPOINT)"
+                -OPENAI_SWEDEN "$(OPENAI-SWEDEN)"
+                -DATALAKE_NAME "$(DATALAKE-NAME)"
+                -DATALAKE_NAME_DEV "$(DATALAKE-NAME-DEV)"
+                -DATALAKE_NAME_PRD "$(DATALAKE-NAME-PRD)"
+                -STORAGE_ACCOUNT_STDLSPLTFRM_ACCOUNT_KEY "$(STORAGE-ACCOUNT-STDLSPLTFRM-ACCOUNT-KEY)"
+                -ID_UAMI_MLW_ML_PLTFRM_PRD_CI_CLIENT_ID "$(ID-UAMI-MLW-ML-PLTFRM-PRD-CI-CLIENT-ID)"
+                -POWER_AUTOMATE_SEND_EMAIL_FLOW_URL "$(POWER-AUTOMATE-SEND-EMAIL-FLOW-URL)"
+                -RESOURCE_GROUP_PRD "$(RESOURCE-GROUP-PRD)"
+                -WORKSPACE_NAME_PRD "$(WORKSPACE-NAME-PRD)"
+
+- stage: DeployStg
+  pool:
+    vmImage: ubuntu-latest
+  jobs:
+  - deployment: DeployWebAppPrdStg
+    displayName: Deploy on staging slot
+    environment: 
+      name: Productie&Staging
+    strategy:
+      runOnce:
+        deploy:
+          steps:
+          - script: |
+              echo BuildAndPush result: $(dependencies.BuildAndPush.result)
+          - checkout: self
+          - template: keyvault-firewall.yml
+            parameters:
+              serviceConnection: Pitwall-Prod
+              kvName: kv-ml-pltfrm-prd
+              resourceGroup: rg-datapltfrm-prd
+          - task: AzureRmWebAppDeployment@4
+            displayName: Deploy Web App Test Slot
+            inputs:
+              ConnectionType: AzureRM
+              azureSubscription: Pitwall-Prod
+              appType: webAppContainer
+              WebAppName: $(app_name)
+              deployToSlotOrASE: true
+              resourceGroupName: rg-mlcontainers-prd
+              slotName: stg
+              DockerNamespace: crmlpltfrmprd.azurecr.io
+              DockerRepository: $(container_repository)
+              DockerImageTag: $(tag)
+              TakeAppOfflineFlag: true
+              AppSettings: >- # >- is important for multiline block
+                -WEBSITES_PORT 8080 
+                -OTAP prd
+                -AML_SUBSCRIPTION_ID "$(AML-SUBSCRIPTION-ID)"
+                -APPLICATION_INSIGHTS_CONNECTION_STRING "$(APPLICATION-INSIGHTS-CONNECTION-STRING)"
+                -APPLICATION_INSIGHTS_NAMESPACE "$(APPLICATION-INSIGHTS-NAMESPACE)"
+                -OPENAI_API_KEY_WESTEUROPE "$(OPENAI-API-KEY)"
+                -OPENAI_ENDPOINT_WESTEUROPE "$(OPENAI-ENDPOINT)"
+                -OPENAI_SWEDEN_ENDPOINT "$(OPENAI-SWEDEN-ENDPOINT)"
+                -OPENAI_SWEDEN "$(OPENAI-SWEDEN)"
+                -DATALAKE_NAME "$(DATALAKE-NAME)"
+                -DATALAKE_NAME_DEV "$(DATALAKE-NAME-DEV)"
+                -DATALAKE_NAME_PRD "$(DATALAKE-NAME-PRD)"
+                -STORAGE_ACCOUNT_STDLSPLTFRM_ACCOUNT_KEY "$(STORAGE-ACCOUNT-STDLSPLTFRM-ACCOUNT-KEY)"
+                -ID_UAMI_MLW_ML_PLTFRM_PRD_CI_CLIENT_ID "$(ID-UAMI-MLW-ML-PLTFRM-PRD-CI-CLIENT-ID)"
+                -POWER_AUTOMATE_SEND_EMAIL_FLOW_URL "$(POWER-AUTOMATE-SEND-EMAIL-FLOW-URL)"
+                -RESOURCE_GROUP_PRD "$(RESOURCE-GROUP-PRD)"
+                -WORKSPACE_NAME_PRD "$(WORKSPACE-NAME-PRD)"
+                

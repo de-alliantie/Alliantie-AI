@@ -1,0 +1,43 @@
+minimum_pre_commit_version: "3.8.0"
+repos:
+  - repo: https://github.com/timothycrosley/isort
+    rev: 5.11.5
+    hooks:
+      - id: isort
+        additional_dependencies: [toml]
+        args: ["--profile", "black"]
+  - repo: https://github.com/psf/black
+    rev: 22.3.0
+    hooks:
+      - id: black
+        args: [--line-length=120]
+  - repo: https://github.com/PyCQA/docformatter
+    rev: v1.7.5
+    hooks:
+      - id: docformatter
+        additional_dependencies: [tomli]
+        args: [--wrap-summaries=120, --wrap-description=120, --in-place]
+  - repo: https://github.com/PYCQA/flake8
+    rev: 7.2.0
+    hooks:
+      - id: flake8
+        # exclude: ^.venv
+        files: ^.*\.py$ # only python files
+        args: 
+          - --max-line-length=120
+          - --ignore=E266,W503
+  - repo: https://github.com/pycqa/pydocstyle
+    rev: 6.1.1
+    hooks:
+      - id: pydocstyle
+        files: ^.*\.py$ # only python files everywhere
+        additional_dependencies: 
+          - toml
+          - "snowballstemmer==2.0.0"
+        args: 
+          - --ignore= D2,D100,D400,D401,D402,D403,D404,D405,D406,D407,D408,D409,D410,D411,D412,D413,D415,D416,D417,D418 #--max-doc-length=120,
+  -   repo: https://github.com/Yelp/detect-secrets
+      rev: v1.4.0
+      hooks:
+      -   id: detect-secrets
+          args: ['--exclude-files', '.*\.ipynb$', ]

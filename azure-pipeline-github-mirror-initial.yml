@@ -1,0 +1,121 @@
+# This pipeline mirrors the current state of the Azure DevOps repository to GitHub
+# It ensures only the current commit is pushed to GitHub without any history.
+#
+# The pipeline contains the following steps:
+# - The CI stage performs linting, secret-scanning and SAST checks before mirroring.
+# - In the Mirror_To_GitHub stage, we:
+#   - get the githubkey (SSH key), required for pushing to github
+#   - get the botGPG key, for signing the commit
+#   - setup the SSH key so it will be used for the push
+#   - make an orphan branch (a branch without history) of the current state of the repository
+#   - add all files of the current commit to the orphan branch
+#   - commit, sign and push to GitHub
+
+trigger: none
+
+stages:
+
+- stage: CI
+  pool:
+    vmImage: ubuntu-latest
+  jobs:
+  - job: lint
+    displayName: Lint checks
+    steps:
+    - task: UsePythonVersion@0
+      inputs:
+        versionSpec: '3.10'
+    - checkout: self
+    - script: pip install pre-commit==3.8.0
+    - bash: pre-commit run --all -v
+  - job: SastBandit
+    displayName: SAST - Bandit
+    steps:
+    - task: UsePythonVersion@0
+      inputs:
+        versionSpec: '3.10'
+    - script: |
+        python -m pip install bandit
+      name: install_bandit
+      displayName: 'Install bandit'
+    # bandit -lll means only flag HIGH severity issues
+    - script: |
+        python -m bandit -r ./src -lll
+      displayName: 'Bandit scan'
+      condition: succeeded() 
+  - job: SastMdso
+    displayName: SAST - Terrascan and Trivy
+    steps:
+    - task: MicrosoftSecurityDevOps@1
+      displayName: 'Microsoft Security DevOps'
+      inputs:
+        tools: 'terrascan, trivy'
+        break: true # this build step if any high severity level results are found.
+        publish: true # will publish the output SARIF results file to the chosen pipeline artifact
+
+
+- stage: Mirror_to_GitHub
+  dependsOn: CI
+  pool:
+    vmImage: ubuntu-latest
+  jobs:
+  - job: Mirror_to_GitHub
+    displayName: Mirror to Github
+    steps:
+    - checkout: self
+      fetchDepth: 0
+      persistCredentials: true
+
+    - task: DownloadSecureFile@1
+      name: githubKey
+      inputs:
+        secureFile: azdo_github_mirror_alliantieai
+
+    - task: DownloadSecureFile@1
+      name: botGPG
+      inputs:
+        secureFile: oss-bot-gpg.asc
+
+
+    - script: |
+        set -e
+
+        # Put SSH deployment key in correct folder and create know_hosts file
+        mkdir -p ~/.ssh
+        chmod 700 ~/.ssh
+
+        cp $(githubKey.secureFilePath) ~/.ssh/id_ed25519
+        chmod 600 ~/.ssh/id_ed25519
+
+        ssh-keyscan github.com >> ~/.ssh/known_hosts
+        chmod 644 ~/.ssh/known_hosts
+      displayName: Configure GitHub deployment key
+
+    - script: |
+
+        # Set signing key
+        gpg --import $(botGPG.secureFilePath)
+        export GPG_TTY=$(tty)
+
+        # Tell git where to get the signing key
+        git config user.signingkey "$(gpg --list-secret-keys --keyid-format LONG | grep sec | awk '{print $2}' | cut -d'/' -f2)"
+        git config commit.gpgsign true
+
+        # Make an orphan branch (github-main) with no history
+        git checkout --orphan github-main
+
+        # Add all current files in the repo
+        git add .
+   
+        git config user.name "Alliantie Data Science Team"
+        git config user.email "alliantie-data-science-team@users.noreply.github.com"
+
+        git commit -S -m "Initial open source commit"
+
+        # Add the GitHub repository as remote
+        git remote add github git@github.com:de-alliantie/Alliantie-AI.git
+
+        # Push the current head (of github-main) to the repository
+        git push github github-main:refs/heads/main --force
+
+      displayName: Initial push to GitHub of current state

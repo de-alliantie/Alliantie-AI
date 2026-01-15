@@ -1,0 +1,35 @@
+FROM ubuntu:24.04
+
+LABEL maintainer="dcc@de-alliantie.nl"
+
+ARG homedir=/opt/alliantie-gen-ai
+ARG azuredir=/.azure
+
+ARG OTAP="local"
+ENV OTAP=${OTAP}
+
+# Switch to root for changing dir ownership/permissions
+USER 0
+
+WORKDIR ${homedir}
+
+# Azure ML does something within this dir -> make sure user 1001 has permissions
+RUN mkdir ${azuredir}
+
+RUN apt-get update && apt-get install -y \
+    python3 \
+    python3-pip \
+    python3-venv \
+    curl
+
+COPY ./requirements-delete-files.txt .
+
+RUN python3 -m venv venv
+
+RUN venv/bin/pip install -r requirements-delete-files.txt
+
+COPY . .
+
+RUN venv/bin/pip install -e .
+
+CMD venv/bin/python src/data_deletion/delete_files.py

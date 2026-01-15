@@ -1,0 +1,46 @@
+/* Side bar background color */
+[data-testid="stSidebarContent"] {
+    background-color: #0062FF;
+}
+
+/* titel van tabbladen */
+a[data-testid="stSidebarNavLink"] span {
+    color: white !important;
+}
+
+ /* Title of selectbox and title of fileuploader (=labels) */
+label, .stFileUploader label {
+    color: white !important;
+}
+
+/* Files that have been uploaded */
+div[data-testid="stFileUploaderFileName"] {
+    color: white !important;
+}
+
+/* Expander "geavanceerde opties" text */
+[data-testid="stExpander"] > details {
+    background-color: white;
+}
+  
+/* Ensure markdown text inside "geavanceerde opties" maintains its original color */
+[data-testid="stExpander"] [data-testid="stMarkdownContainer"] p {
+    color: black;
+}
+
+/* Ensure metric labels are black instead of white */
+div[data-testid="stMetric"] label div div[data-testid="stMarkdownContainer"] p {
+    color: black !important;
+}
+
+/* Ensure date picker label is black instead of white */
+div[data-testid="stDateInput"] label div[data-testid="stMarkdownContainer"] p {
+    color: black !important;
+}
+
+
+/* Vergroot logo linksboven */
+[alt=Logo] {
+    width: 100%; 
+    height: auto;
+  }

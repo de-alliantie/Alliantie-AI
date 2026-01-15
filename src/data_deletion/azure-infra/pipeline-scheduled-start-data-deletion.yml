@@ -1,0 +1,123 @@
+trigger: none
+
+schedules:
+- cron: '30 4 * * *' # every day at 4:30 UTC
+  displayName: daily_run
+  branches:
+    include: [main]
+  always: true 
+
+pool:
+  vmImage: ubuntu-latest
+
+variables:
+  ${{ if eq(variables['Build.SourceBranchName'], 'main') }}:
+    serviceConnection: 'Pitwall-Prod'
+    containerRegistry: 'crmlpltfrmprd'
+    resourceGroup: 'rg-datapltfrm-prd'
+    containerName: 'alliantie-gen-ai-datadeletion-prd'
+    containerResourceGroup: 'rg-mlcontainers-prd'
+    kvName: 'kv-ml-pltfrm-prd'
+    OTAP: 'P'
+  ${{ else }}:
+    serviceConnection: 'Pitwall-Dev'
+    containerRegistry: 'crmlpltfrmdev'
+    resourceGroup: 'rg-datapltfrm-dev'
+    containerName: 'alliantie-gen-ai-datadeletion-dev'
+    containerResourceGroup: 'rg-mlcontainers-dev'
+    kvName: 'kv-ml-pltfrm-dev'
+    OTAP: 'OTA'
+  tags: |
+    $(Build.BuildId)
+    latest
+
+jobs:
+  - job:
+    steps:
+
+    - task: AzureCLI@2
+      displayName: Whitelist IP in KV 
+      inputs:
+        azureSubscription: $(serviceConnection)
+        scriptType: "bash"
+        scriptLocation: "inlineScript"
+        inlineScript: |
+          agent_ip=$(curl -s ifconfig.me)
+          echo The IP address is $agent_ip
+          echo "##vso[task.setvariable variable=agentIP]$agent_ip"
+          az keyvault network-rule add --name $(kvName) --resource-group $(resourceGroup) --ip-address $agent_ip
+
+          echo "Checking once per minute for up to 30 minutes if the IP has been whitelisted"
+          for i in {1..30}; do
+            ip_list=$(az keyvault show --name $(kvName) --query "properties.networkAcls.ipRules[].value" -o tsv)
+            if echo "$ip_list" | grep -E "^$agent_ip"; then
+              echo "IP address $agent_ip has been whitelisted successfully."
+              break
+            else
+              echo "IP address $agent_ip has not been found in the whitelist. Waiting for 1 minute and checking again..."
+              sleep 60
+            fi
+          done
+    - script: |
+        secret_names=$(paste -sd, needed-secrets.txt)
+        echo "##vso[task.setvariable variable=secretsList]$secret_names"
+      displayName: Read names of secrets from .txt
+    
+    - task: AzureKeyVault@2
+      displayName: 'Access KV and get secrets'
+      inputs:
+        azureSubscription: $(serviceConnection)
+        KeyVaultName: $(kvName)
+        SecretsFilter: $(secretsList) # comma seperated string
+  
+    - task: AzureCLI@2
+      displayName: Remove whitelisted IP
+      condition: always()
+      inputs:
+        azureSubscription: $(serviceConnection)
+        scriptType: "bash"
+        scriptLocation: "inlineScript"
+        inlineScript: |
+          az keyvault network-rule remove --name $(kvName) --resource-group $(resourceGroup) --ip-address $(agentIP)
+
+    - task: AzureCLI@2
+      displayName: Delete container instance for scheduled start
+      inputs:
+        azureSubscription: $(serviceConnection)
+        scriptType: "bash"
+        scriptLocation: "inlineScript"
+        inlineScript: |
+          az container delete --name 'ci-$(containerName)' --resource-group $(containerResourceGroup) --yes
+          sleep 10
+
+    - task: AzureCLI@2
+      displayName: Create container instance for scheduled start
+      inputs:
+        azureSubscription: $(serviceConnection)
+        scriptType: "bash"
+        scriptLocation: "inlineScript"
+        inlineScript: |
+          az container create \
+            --resource-group $(containerResourceGroup) \
+            --name 'ci-$(containerName)' \
+            --image $(containerRegistry).azurecr.io/$(containerName):latest \
+            --assign-identity $(ID-UAMI-DATASCIENCE-CI-RESOURCE-ID) \
+            --registry-username $(containerRegistry) \
+            --registry-password $(CONTAINER-REGISTRY-PASSWORD) \
+            --log-analytics-workspace '$(LOG-ANALYTICS-WORKSPACE-ID)' \
+            --log-analytics-workspace-key '$(LOG-ANALYTICS-WORKSPACE-PRIMARY-KEY)' \
+            --secure-environment-variables \
+                APPLICATION_INSIGHTS_CONNECTION_STRING='$(APPLICATION-INSIGHTS-CONNECTION-STRING)' \
+                APPLICATION_INSIGHTS_NAMESPACE="$(APPLICATION-INSIGHTS-NAMESPACE)" \
+                AZURE_CLIENT_ID='$(ID-UAMI-DATASCIENCE-CI-CLIENT-ID)' \
+                OPENAI_SWEDEN_ENDPOINT='$(OPENAI-SWEDEN-ENDPOINT)' \
+                OPENAI_SWEDEN='$(OPENAI-SWEDEN)' \
+                DATALAKE_NAME='$(DATALAKE-NAME)' \
+                DATALAKE_NAME_DEV='$(DATALAKE-NAME-DEV)' \
+                DATALAKE_NAME_PRD='$(DATALAKE-NAME-PRD)' \
+                TEAMS_WEBHOOK_DATASCIENCE_ALGEMEEN='$(TEAMS-WEBHOOK-DATASCIENCE-ALGEMEEN)' \
+
+            --restart-policy Never \
+            --cpu 2 \
+            --memory 16 \
+            --os-type Linux \

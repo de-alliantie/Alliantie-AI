@@ -1,0 +1,18 @@
+name: transcribe_env
+channels:
+  - pytorch
+  - conda-forge
+  - defaults
+dependencies:
+  - python=3.10
+  - pip=24.2
+  - pip:
+    - faster-whisper==1.1.1
+    - mldesigner==0.1.0b19
+    - azure-identity==1.22.0
+    - azure-ai-ml==1.27.0
+    - python-dotenv==1.1.0
+    - azure-keyvault-secrets==4.9.0
+    - azure-monitor-opentelemetry==1.6.8
+    - Office365-REST-Python-Client==2.6.1
+    - ctranslate2==4.4.0

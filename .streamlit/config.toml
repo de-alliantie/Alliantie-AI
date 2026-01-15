@@ -1,0 +1,24 @@
+[theme]
+
+# The preset Streamlit theme that your custom theme inherits from.
+# One of "light" or "dark".
+base = "light"
+
+# Accent color (Alliantie Oranje)
+primaryColor = "#FF5303"
+
+# Background color for the main content area.
+backgroundColor = "#FFFFFF" # white
+
+# Color used for almost all text.
+textColor = "#000000" # this is black
+
+# Font family for all text in the app, except code blocks. One of "sans serif",
+# "serif", or "monospace".
+font = "sans serif"
+
+[ui]
+hideTopBar = true
+
+[client]
+toolbarMode = "minimal"  # Options: "developer", "viewer", "minimal", "auto"

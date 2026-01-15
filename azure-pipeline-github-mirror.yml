@@ -1,0 +1,132 @@
+# This pipeline pushes the latest commit from the Azure DevOps repository to GitHub
+# It ensures only the latest commit on the branch the pipeline is ran from is pushed to GitHub without any history.
+#
+# The pipeline contains the following steps:
+# - The CI stage performs linting, secret-scanning and SAST checks before mirroring.
+# - In the Mirror_To_GitHub stage, we:
+#   - get the githubkey (SSH key), required for pushing to github
+#   - get the botGPG key, for signing the commit
+#   - setup the SSH key so it will be used for the push
+#   - add the GitHub repository as remote
+#   - add all files of the latest commit on Azure DevOps to the Github branch
+#   - commit, sign and push to GitHub
+
+trigger: none
+
+stages:
+
+- stage: CI
+  pool:
+    vmImage: ubuntu-latest
+  jobs:
+  - job: lint
+    displayName: Lint checks
+    steps:
+    - task: UsePythonVersion@0
+      inputs:
+        versionSpec: '3.10'
+    - checkout: self
+    - script: pip install pre-commit==3.8.0
+    - bash: pre-commit run --all -v
+  - job: SastBandit
+    displayName: SAST - Bandit
+    steps:
+    - task: UsePythonVersion@0
+      inputs:
+        versionSpec: '3.10'
+    - script: |
+        python -m pip install bandit
+      name: install_bandit
+      displayName: 'Install bandit'
+    # bandit -lll means only flag HIGH severity issues
+    - script: |
+        python -m bandit -r ./src -lll
+      displayName: 'Bandit scan'
+      condition: succeeded() 
+  - job: SastMdso
+    displayName: SAST - Terrascan and Trivy
+    steps:
+    - task: MicrosoftSecurityDevOps@1
+      displayName: 'Microsoft Security DevOps'
+      inputs:
+        tools: 'terrascan, trivy'
+        break: true # this build step if any high severity level results are found.
+        publish: true # will publish the output SARIF results file to the chosen pipeline artifact
+
+
+- stage: Mirror_to_GitHub
+  dependsOn: CI
+  pool:
+    vmImage: ubuntu-latest
+  jobs:
+  - job: Mirror_to_GitHub
+    displayName: Mirror to Github
+    steps:
+    - checkout: self
+      fetchDepth: 0
+      persistCredentials: true
+
+    - task: DownloadSecureFile@1
+      name: githubKey
+      inputs:
+        secureFile: azdo_github_mirror_alliantieai
+
+    - task: DownloadSecureFile@1
+      name: botGPG
+      inputs:
+        secureFile: oss-bot-gpg.asc
+
+    - script: |
+        set -e
+
+        # Put SSH deployment key in correct folder and create know_hosts file
+        mkdir -p ~/.ssh
+        chmod 700 ~/.ssh
+
+        cp $(githubKey.secureFilePath) ~/.ssh/id_ed25519
+        chmod 600 ~/.ssh/id_ed25519
+
+        ssh-keyscan github.com >> ~/.ssh/known_hosts
+        chmod 644 ~/.ssh/known_hosts
+      displayName: Configure deployment key
+
+# WORKING BUT NOT SIGNED
+    - script: |
+        # Set signing key
+        gpg --import $(botGPG.secureFilePath)
+        export GPG_TTY=$(tty)
+
+        # Tell git where to get the signing key
+        git config user.signingkey "$(gpg --list-secret-keys --keyid-format LONG | grep sec | awk '{print $2}' | cut -d'/' -f2)"
+        git config commit.gpgsign true
+
+        # Get metadata from latest internal commit
+        AUTHOR_NAME=$(git log -1 --pretty=format:'%an')
+        AUTHOR_EMAIL=$(git log -1 --pretty=format:'%ae')
+        COMMIT_MSG=$(git log -1 --pretty=format:'%B')
+
+        # Add GitHub remote
+        git remote add github git@github.com:de-alliantie/Alliantie-AI.git
+        git fetch github main
+
+        # Checkout the OSS branch
+        git checkout github/main
+
+        # Configure bot committer identity
+        git config user.name "Alliantie Data Science Team"
+        git config user.email "alliantie-data-science-team@users.noreply.github.com"
+
+        echo "Mirroring commit from $AUTHOR_NAME <$AUTHOR_EMAIL>"
+
+        # Stage all changes from the internal branch
+        git checkout $(Build.SourceVersion) -- .  # copy files from current internal commit
+
+        # Stage everything
+        git add .
+
+        # Commit with original author and bot signature
+        git commit -S --author="$AUTHOR_NAME <$AUTHOR_EMAIL>" -m "$COMMIT_MSG"
+
+        # Push to GitHub
+        git push github HEAD:main --force
+      displayName: Push to Github

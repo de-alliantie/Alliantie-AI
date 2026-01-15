@@ -1,0 +1,79 @@
+# Deze pipeline pusht een base image met pandoc daaraan toegevoegd naar de Azure Container Registry.
+# Deze wordt als environment image meegegeven in de component waarmee de AML job wordt afgetrapt: 
+# src/notulen/azure-infra/post_transcribe_job/post_transcribe_component_file.py
+# De bijbehorende dockerfile staat in dockerfiles/notulen/Dockerfile.amlpandoc
+
+trigger: none
+
+variables:
+  - name: tag
+    value: |
+      $(Build.BuildId)
+      latest
+  - ${{ if eq(variables['Build.SourceBranchName'], 'main') }}:
+    - name: dockerRegistryServiceConnection
+      value: Pitwall-datapltfrm-docker-prd
+    - name: container_repository
+      value: aml-pandoc-prd
+  - ${{ else }}:
+    - name: dockerRegistryServiceConnection
+      value: Pitwall-datapltfrm-docker-prd
+    - name: container_repository
+      value: aml-pandoc-dev
+
+stages:
+
+- stage: CI  
+  pool:
+    vmImage: ubuntu-latest
+  jobs:
+  - job: lint
+    displayName: lint checks
+    steps:
+    - checkout: self
+    - script: pip install pre-commit==3.8.0
+    - bash: pre-commit run --all -v
+  - job: SastBandit
+    displayName: Static application security testing with Bandit
+    steps:
+    - task: UsePythonVersion@0
+      inputs:
+        versionSpec: '3.10'
+    - script: |
+        python -m pip install bandit
+      name: install_bandit
+      displayName: 'Install bandit'
+    # bandit -lll means only flag HIGH severity issues
+    - script: |
+        python -m bandit -r ./src -lll
+      displayName: 'Bandit scan'
+      condition: succeeded() 
+  - job: SastMdso
+    displayName: Static application security testing with Terrascan and Trivy
+    steps:
+    - task: MicrosoftSecurityDevOps@1
+      displayName: 'Microsoft Security DevOps'
+      inputs:
+        tools: 'terrascan, trivy'
+        break: true # this build step if any high severity level results are found.
+        publish: true # will publish the output SARIF results file to the chosen pipeline artifact
+
+- stage: BuildAndPush
+  dependsOn: CI
+  pool:
+    vmImage: ubuntu-latest
+
+  jobs:
+  - job:
+    displayName: build and push Docker image
+    steps:
+    - checkout: self
+    - task: Docker@2
+      displayName: Build and push Docker image
+      inputs:
+        command: buildAndPush
+        containerRegistry: $(dockerRegistryServiceConnection)
+        repository: $(container_repository)
+        dockerfile: dockerfiles/notulen/Dockerfile.amlpandoc
+        buildContext: $(Build.SourcesDirectory)
+        tags: $(tag)

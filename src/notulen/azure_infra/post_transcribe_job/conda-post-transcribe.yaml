@@ -1,0 +1,23 @@
+name: post_transcribe_env
+channels:
+  - pytorch
+  - conda-forge
+  - defaults
+dependencies:
+  - python=3.10
+  - pip=24.2
+  - pip:
+    - azure-identity==1.22.0
+    - azure-storage-blob==12.25.1
+    - azure-monitor-opentelemetry==1.6.8
+    - azure-ai-ml==1.27.0
+    - mldesigner==0.1.0b19
+    - pre-commit==3.8.0
+    - python-dotenv==1.1.0
+    - Unidecode==1.4.0
+    - Office365-REST-Python-Client==2.6.1
+    - faster-whisper==1.1.1
+    - openai==1.77.0
+    - pypandoc==1.15
+    - pdf4llm==0.0.22
+    - streamlit==1.45.0

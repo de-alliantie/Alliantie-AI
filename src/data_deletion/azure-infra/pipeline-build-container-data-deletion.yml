@@ -1,0 +1,88 @@
+trigger:
+  branches:
+    include:
+    - main
+  paths:
+    include:
+    - src/*
+
+variables:
+  ${{ if eq(variables['Build.SourceBranchName'], 'main') }}:
+    dockerRegistryServiceConnection: 'Pitwall-datapltfrm-docker-prd'
+    containerName: 'alliantie-gen-ai-datadeletion-prd'
+    OTAP: 'P'
+  ${{ else }}:
+    dockerRegistryServiceConnection: 'Pitwall-datapltfrm-docker-dev'
+    containerName: 'alliantie-gen-ai-datadeletion-dev'
+    OTAP: 'OTA'
+  tags: |
+    $(Build.BuildId)
+    latest
+
+stages:
+
+- stage: ChecksAndTests  
+  pool:
+    vmImage: ubuntu-latest
+  jobs:
+  - job: lint
+    displayName: lint checks
+    steps:
+    - task: UsePythonVersion@0
+      inputs:
+        versionSpec: '3.10'
+    - checkout: self
+    - script: pip install pre-commit==3.8.0
+    - bash: pre-commit run --all -v
+  - job: SastBandit
+    displayName: Static application security testing with Bandit
+    steps:
+    - task: UsePythonVersion@0
+      inputs:
+        versionSpec: '3.10'
+    - script: |
+        python -m pip install bandit
+      name: install_bandit
+      displayName: 'Install bandit'
+    # bandit -lll means only flag HIGH severity issues
+    - script: |
+        python -m bandit -r ./src -lll
+      displayName: 'Bandit scan'
+      condition: succeeded() 
+  - job: SastMdso
+    displayName: Static application security testing with Terrascan and Trivy
+    steps:
+    - task: MicrosoftSecurityDevOps@1
+      displayName: 'Microsoft Security DevOps'
+      inputs:
+        tools: 'terrascan, trivy'
+        break: true # this build step if any high severity level results are found.
+        publish: true # will publish the output SARIF results file to the chosen pipeline artifact
+
+- stage: BuildAndPush
+  dependsOn: ChecksAndTests
+  pool:
+    vmImage: ubuntu-latest
+  jobs:
+    
+    - job:
+      steps:
+
+      - task: Docker@2
+        displayName: Build an image
+        inputs:
+          command: build
+          containerRegistry: $(dockerRegistryServiceConnection)
+          repository: $(containerName)
+          dockerfile: ./dockerfiles/data_deletion/Dockerfile.deletefiles
+          buildContext: $(Build.SourcesDirectory) # because the Dockerfile is in a subfolder and the requirements is in the root folder
+          tags: $(tags)
+          arguments: '--build-arg OTAP=$(OTAP)'
+
+      - task: Docker@2
+        displayName: Push an image to container registry
+        inputs:
+          command: push
+          containerRegistry: $(dockerRegistryServiceConnection)
+          repository: $(containerName)
+          tags: $(tags)
