@@ -116,7 +116,6 @@ jobs:
                 DATALAKE_NAME_DEV='$(DATALAKE-NAME-DEV)' \
                 DATALAKE_NAME_PRD='$(DATALAKE-NAME-PRD)' \
                 TEAMS_WEBHOOK_DATASCIENCE_ALGEMEEN='$(TEAMS-WEBHOOK-DATASCIENCE-ALGEMEEN)' \
-
             --restart-policy Never \
             --cpu 2 \
             --memory 16 \
