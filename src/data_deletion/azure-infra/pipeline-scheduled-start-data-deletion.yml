@@ -35,50 +35,12 @@ jobs:
   - job:
     steps:
 
-    - task: AzureCLI@2
-      displayName: Whitelist IP in KV 
-      inputs:
-        azureSubscription: $(serviceConnection)
-        scriptType: "bash"
-        scriptLocation: "inlineScript"
-        inlineScript: |
-          agent_ip=$(curl -s ifconfig.me)
-          echo The IP address is $agent_ip
-          echo "##vso[task.setvariable variable=agentIP]$agent_ip"
-          az keyvault network-rule add --name $(kvName) --resource-group $(resourceGroup) --ip-address $agent_ip
-
-          echo "Checking once per minute for up to 30 minutes if the IP has been whitelisted"
-          for i in {1..30}; do
-            ip_list=$(az keyvault show --name $(kvName) --query "properties.networkAcls.ipRules[].value" -o tsv)
-            if echo "$ip_list" | grep -E "^$agent_ip"; then
-              echo "IP address $agent_ip has been whitelisted successfully."
-              break
-            else
-              echo "IP address $agent_ip has not been found in the whitelist. Waiting for 1 minute and checking again..."
-              sleep 60
-            fi
-          done
-    - script: |
-        secret_names=$(paste -sd, needed-secrets.txt)
-        echo "##vso[task.setvariable variable=secretsList]$secret_names"
-      displayName: Read names of secrets from .txt
-    
-    - task: AzureKeyVault@2
-      displayName: 'Access KV and get secrets'
-      inputs:
-        azureSubscription: $(serviceConnection)
-        KeyVaultName: $(kvName)
-        SecretsFilter: $(secretsList) # comma seperated string
-  
-    - task: AzureCLI@2
-      displayName: Remove whitelisted IP
-      condition: always()
-      inputs:
-        azureSubscription: $(serviceConnection)
-        scriptType: "bash"
-        scriptLocation: "inlineScript"
-        inlineScript: |
-          az keyvault network-rule remove --name $(kvName) --resource-group $(resourceGroup) --ip-address $(agentIP)
+    - checkout: self
+    - template: keyvault-firewall.yaml
+      parameters:
+        serviceConnection: $(serviceConnection)
+        kvName: $(kvName)
+        resourceGroup: $(resourceGroup)
 
     - task: AzureCLI@2
       displayName: Delete container instance for scheduled start

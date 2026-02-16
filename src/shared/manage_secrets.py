@@ -6,13 +6,13 @@ from azure.identity import DefaultAzureCredential
 from azure.keyvault.secrets import SecretClient
 from dotenv import dotenv_values, load_dotenv
 
-# For a new secret, update needed-secrets.txt as well as the YAML file,
+# For a new secret, update needed_secrets.txt as well as the YAML file,
 # after --secure-environment-variables
 
 
 def manage_secrets(all_secrets: bool = False):
     """Create a .env file with your secrets. Choose between all secrets in the key vault, or only those where the names
-    are given in needed-secrets.txt.
+    are given in needed_secrets.txt.
 
     To whitelist your IP in the keyvault, run for example
     az keyvault network-rule add -n KEYVAULT-NAME -g RESOURCEGROUP-NAME --ip-address $(curl -s ifconfig.me)
@@ -22,7 +22,7 @@ def manage_secrets(all_secrets: bool = False):
 
     Args:
         all_secrets (bool, optional): Whether to load all secrets or only the subset
-        in needed-secrets.txt. Defaults to False.
+        in needed_secrets.txt. Defaults to False.
     """
     print(f"GETTING SECRETS! Your environment is {os.environ.get('OTAP', 'local')}")
     credential = DefaultAzureCredential()
@@ -37,10 +37,10 @@ def manage_secrets(all_secrets: bool = False):
 def list_kv_secrets(kv_client, all_secrets: bool) -> list[str]:
     """List secrets in the key vault.
 
-    If all_secrets is False, only the secrets from needed-secrets.txt are returned.
+    If all_secrets is False, only the secrets from needed_secrets.txt are returned.
     """
     if not all_secrets:
-        with open("needed-secrets.txt", "r") as f:
+        with open("needed_secrets.txt", "r") as f:
             kv_secret_names = f.readlines()
         kv_secret_names = [x.strip() for x in kv_secret_names]
     else:

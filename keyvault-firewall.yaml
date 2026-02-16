@@ -1,0 +1,72 @@
+parameters:
+  - name: serviceConnection
+    type: string
+  - name: kvName
+    type: string
+  - name: resourceGroup
+    type: string
+
+steps:    
+  - task: AzureCLI@2
+    displayName: Whitelist IP in KV
+    inputs:
+      azureSubscription: ${{ parameters.serviceConnection }}
+      scriptType: "bash"
+      scriptLocation: "inlineScript"
+      inlineScript: |
+        ip_services=(
+          "dig +short myip.opendns.com @resolver1.opendns.com"
+          "curl -4 -s ifconfig.me"
+          "curl -s ifconfig.io"
+          "curl -4 -s icanhazip.com"
+          "curl -s ifconfig.co"
+        )
+
+        agent_ip=""
+        for service in "${ip_services[@]}"; do
+          # Use eval to support both dig and curl commands
+          agent_ip=$(eval $service)
+          # Validate IP address (IPv4)
+          if [[ $agent_ip =~ ^([0-9]{1,3}\.){3}[0-9]{1,3}$ ]]; then
+            break
+          fi
+          agent_ip=""
+        done
+        
+        echo The IP address is $agent_ip
+        echo "##vso[task.setvariable variable=agentIP]$agent_ip"
+        az keyvault network-rule add --name ${{ parameters.kvName }} --resource-group ${{ parameters.resourceGroup }} --ip-address $agent_ip
+
+        echo "Checking once per minute for up to 30 minutes if the IP has been whitelisted"
+        for i in {1..30}; do
+          ip_list=$(az keyvault show --name ${{ parameters.kvName }} --query "properties.networkAcls.ipRules[].value" -o tsv)
+          if echo "$ip_list" | grep -E "^$agent_ip"; then
+            echo "IP address $agent_ip has been whitelisted successfully."
+            break
+          else
+            echo "IP address $agent_ip has not been found in the whitelist. Waiting for 1 minute and checking again..."
+            sleep 60
+          fi
+        done
+  - script: |
+      secret_names=$(paste -sd, "$(System.DefaultWorkingDirectory)/needed_secrets.txt")
+      echo "##vso[task.setvariable variable=secretsList]$secret_names"
+      echo "$secret_names"
+    displayName: Read names of secrets from .txt
+
+  - task: AzureKeyVault@2
+    displayName: 'Access KV and get secrets'
+    inputs:
+      azureSubscription: ${{ parameters.serviceConnection }}
+      KeyVaultName: ${{ parameters.kvName }}
+      SecretsFilter: $(secretsList)
+
+  - task: AzureCLI@2
+    displayName: Remove whitelisted IP
+    condition: always()
+    inputs:
+      azureSubscription: ${{ parameters.serviceConnection }}
+      scriptType: "bash"
+      scriptLocation: "inlineScript"
+      inlineScript: |
+        az keyvault network-rule remove --name ${{ parameters.kvName }} --resource-group ${{ parameters.resourceGroup }} --ip-address $(agentIP)

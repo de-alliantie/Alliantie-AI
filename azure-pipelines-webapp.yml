@@ -115,7 +115,7 @@ stages:
         deploy:
           steps:
           - checkout: self
-          - template: keyvault-firewall.yml
+          - template: keyvault-firewall.yaml
             parameters:
               serviceConnection: Pitwall-Dev
               kvName: kv-ml-pltfrm-dev
@@ -166,7 +166,7 @@ stages:
         deploy:
           steps:
           - checkout: self
-          - template: keyvault-firewall.yml
+          - template: keyvault-firewall.yaml
             parameters:
               serviceConnection: Pitwall-Dev
               kvName: kv-ml-pltfrm-dev
@@ -219,7 +219,7 @@ stages:
           - script: |
               echo BuildAndPush result: $(dependencies.BuildAndPush.result)
           - checkout: self
-          - template: keyvault-firewall.yml
+          - template: keyvault-firewall.yaml
             parameters:
               serviceConnection: Pitwall-Prod
               kvName: kv-ml-pltfrm-prd
