@@ -36,7 +36,6 @@ Momenteel ondersteunt Veilig ChatGPT de volgende versies:
 - GPT-4.1
 - GPT-5
 
-
 ## Van vraag naar antwoord
 Wanneer een eindgebruiker een vraag stelt, gebeurt er het volgende:
 
