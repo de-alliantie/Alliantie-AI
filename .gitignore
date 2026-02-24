@@ -89,6 +89,7 @@ target/
 .mypy_cache/
 
 logs/*
+.vscode/settings.json
 
 pandoc-3.1.12.3-1-amd64.deb
 webapp_src/upload_component/frontend/node_modules/*

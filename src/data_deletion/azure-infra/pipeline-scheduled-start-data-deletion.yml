@@ -36,7 +36,7 @@ jobs:
     steps:
 
     - checkout: self
-    - template: keyvault-firewall.yaml
+    - template: ../../../keyvault-firewall.yaml
       parameters:
         serviceConnection: $(serviceConnection)
         kvName: $(kvName)
