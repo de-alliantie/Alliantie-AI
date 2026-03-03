@@ -1,0 +1,18 @@
+# Deze Dockerfile maakt een image waaraan pandoc is toegevoegd.
+# Deze image wordt d.m.v. src/notulen/azure-infra/ado-push-amlpandoc-image.yml gepusht naar Azure Container Registry.
+# Deze wordt als environment image meegegeven in de component waarmee de AML job wordt afgetrapt: 
+# src/notulen/azure-infra/post_transcribe_job/post_transcribe_component_file.py
+
+FROM mcr.microsoft.com/azureml/minimal-ubuntu20.04-py39-cpu-inference:latest
+
+USER 0
+
+RUN apt-get update -y
+RUN apt-get upgrade -y
+RUN apt-get install -y --no-install-recommends dialog
+RUN apt-get install pandoc -y
+
+# default user in the base image:
+USER 1000
+
+CMD /bin/bash

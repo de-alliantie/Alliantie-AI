@@ -1,0 +1,12 @@
+body * {
+    font-family: 'Arial', sans-serif !important;
+}
+
+code {
+    font-family: 'Consolas',' Monaco','Lucida Console','Liberation Mono','DejaVu Sans Mono','Bitstream Vera Sans Mono','Courier New' !important;
+    font-size: 14px;
+}
+
+[data-testid="stSidebarContent"] {
+    background-color: #71C010;
+}
