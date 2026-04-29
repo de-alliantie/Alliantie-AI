@@ -183,7 +183,7 @@ def llm_call(prompt: str) -> Callable[[], Generator[str, None, None]]:
     We always enable the code interpreter tool (e.g. for data analysis).
     """
     content = [{"type": "input_text", "text": prompt}]
-    tools = [{"type": "code_interpreter", "container": {"type": "auto"}}]
+    tools = []  # Will add code_interpreter only if needed
     data_file_list = []  # file_id's of excel files and other tabular data files
 
     if len(st.session_state.file_list) > 0:
@@ -210,23 +210,48 @@ def llm_call(prompt: str) -> Callable[[], Generator[str, None, None]]:
                     )
                 elif file_name.endswith(tuple(DATA_EXTENSIONS)):
                     data_file_list.append(file_id)
+
+                # Because PDF can be many types: text, image, text converted to image,
+                # we add it separately so we can always view the contents.
+                # A PDF will therefore be both part of the vector_store and added here as content to the message
+                if file_name.endswith(".pdf"):
+                    content.append(
+                        {
+                            "type": "input_file",
+                            "filename": f"{file_info.get('file_name')}",
+                            "file_data": f"data:application/pdf;base64,{file_info.get('b64_encoded_file')}",
+                        }
+                    )
+
                 # Set processed state to True
                 st.session_state.file_list[i]["processed"] = True
         if len(data_file_list) > 0:
-            tools[0] = {  # replace the code interpreter tool to include the data files
-                "type": "code_interpreter",
-                "container": {"type": "auto", "file_ids": data_file_list},
-            }
+            tools.append(
+                {  # add the code interpreter tool to include the data files
+                    "type": "code_interpreter",
+                    "container": {"type": "auto", "file_ids": data_file_list},
+                }
+            )
     client = get_client()
 
-    stream = client.responses.create(
-        model=LLM_CHOICE[st.session_state.gpt_version],
-        tools=tools,
-        previous_response_id=st.session_state.previous_response_id,
-        input=[{"role": "user", "content": content}],
-        # include=["file_search_call.results"], # not needed now, we retrieve it later
-        stream=True,
-    )
+    # Build the API call parameters
+    api_params = {
+        "model": LLM_CHOICE[st.session_state.gpt_version],
+        "previous_response_id": st.session_state.previous_response_id,
+        "input": [{"role": "user", "content": content}],
+        "stream": True,
+    }
+
+    # We only add reasoning if the user has selected a reasoning effort and if the model is GPT-5.4,
+    # because reasoning is only available for that model.
+    if st.session_state.reasoning_effort != "none" and st.session_state.gpt_version == "GPT-5.4":
+        api_params["reasoning"] = {"effort": st.session_state.reasoning_effort}
+
+    # Only include tools if we have any
+    if len(tools) > 0:
+        api_params["tools"] = tools
+
+    stream = client.responses.create(**api_params)
 
     def event_generator() -> Generator:
         """Generator function to stream events from the run."""
@@ -458,7 +483,7 @@ with st.sidebar:
         LLM_CHOICE.keys(),
         key="gpt_version",
         disabled=st.session_state.freeze_selectbox,
-        help="Volgorde van goedkoop naar duur is GPT-4.1 mini, GPT-4.1, GPT-5.",
+        help="Volgorde van goedkoop naar duur is GPT-4.1 mini, GPT-4.1, GPT-5.4",
     )
 
     with st.expander("Geavanceerde opties"):
@@ -485,10 +510,26 @@ with st.sidebar:
             Met Normaal heb je het snelste antwoord. Met Hoog kan Veilig ChatGPT meer detail zien.
             """,
         )
+        reasoning_effort_dict = {"Uit": "none", "Laag": "low", "Gemiddeld": "medium", "Hoog": "high"}
+        selected_reasoning = st.selectbox(
+            "Reasoning effort",
+            list(reasoning_effort_dict.keys()),
+            index=0,  # default is "none"
+            help="""
+            Wanneer je ChatGPT 5.4 als model selecteert, kan je reasoning aanzetten.
+            Met deze knop kies je hoeveel extra rekenkracht ChatGPT gebruikt om tot een antwoord te komen.
+            Meer rekenkracht kan zorgen voor een beter antwoord, maar ook voor een langere wachttijd.
+            """,
+        )
         if selected_quality is not None:
             st.session_state.image_quality = image_quality_dict[selected_quality]
         else:
             st.session_state.image_quality = "low"  # fallback default
+
+        if selected_reasoning is not None:
+            st.session_state.reasoning_effort = reasoning_effort_dict[selected_reasoning]
+        else:
+            st.session_state.reasoning_effort = "none"  # fallback default
 
     upload_files_widget = st.file_uploader(
         label="Upload bestanden als bijlage.",
@@ -505,7 +546,7 @@ elif st.session_state.gpt_version == "GPT-4.1":
         "Deze versie van ChatGPT is beter dan `GPT-4.1 mini` maar ook iets duurder, heb je al geprobeerd je vraag via `GPT-4.1 mini` te stellen?",  # noqa:E501
         icon="🤖",
     )
-elif st.session_state.gpt_version == "GPT-5":
+elif st.session_state.gpt_version == "GPT-5.4":
     st.info(
         "Dit is de beste ChatGPT versie maar daarmee ook het duurste. Gebruik deze svp alleen als het niet lukt met `GPT-4.1 mini` of `GPT-4.1`.",  # noqa:E501
         icon="🤖",
@@ -566,6 +607,11 @@ with st.spinner("Bestanden verwerken..."):
                     client.vector_stores.files.create(vector_store_id=st.session_state.vector_store_id, file_id=file_id)
 
                 elif widget_file.name.endswith(tuple(IMAGE_EXTENSIONS)):
+                    file_info["b64_encoded_file"] = encode_file_b64(widget_file.name)
+
+                if widget_file.name.endswith(".pdf"):
+                    # We add PDF files separately,
+                    # because they can be of different types (text, image, text converted to image).
                     file_info["b64_encoded_file"] = encode_file_b64(widget_file.name)
 
                 st.session_state.file_list.append(file_info)

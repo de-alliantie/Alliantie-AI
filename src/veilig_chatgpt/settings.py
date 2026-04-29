@@ -5,7 +5,7 @@ OTAP = os.environ.get("OTAP", "local")
 LLM_CHOICE = {
     "GPT-4.1 mini": "safe-chat-gpt-4.1-mini",
     "GPT-4.1": "safe-chat-gpt-4.1",
-    "GPT-5": "safe-chat-gpt-5",
+    "GPT-5.4": "safe-chat-gpt-5.4",
 }
 
 RETRIEVAL_EXTENSIONS = [
